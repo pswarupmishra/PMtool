@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { apiGet, apiSend } from "../../lib/api/client";
+import { apiDelete, apiGet, apiSend } from "../../lib/api/client";
 import { kpis as fallbackKpis, phaseOrder, type KpiDefinition } from "./dashboardData";
 
 type ComponentValues = Record<string, Record<string, number>>;
 type NotesValues = Record<string, string>;
+type ApplicabilityValues = Record<string, "applicable" | "not_relevant">;
+type ApplicabilityReasonValues = Record<string, string>;
 
 type ProjectConfig = {
   id: number;
@@ -27,6 +29,8 @@ type WeeklyEntry = {
   week_start: string;
   value: number;
   component_values: Record<string, number>;
+  applicability_status: "applicable" | "not_relevant";
+  applicability_reason: string | null;
   notes: string | null;
   kpi: {
     id: number;
@@ -83,7 +87,10 @@ function parseDate(value: string) {
 }
 
 function formatDate(value: Date) {
-  return value.toISOString().slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function addMonths(date: Date, months: number) {
@@ -146,6 +153,8 @@ export function WeeklyInputPanel({
   const [selectedDimension, setSelectedDimension] = useState("all");
   const [componentValues, setComponentValues] = useState<ComponentValues>(() => getDefaultComponentValues(kpis));
   const [notesValues, setNotesValues] = useState<NotesValues>({});
+  const [applicabilityValues, setApplicabilityValues] = useState<ApplicabilityValues>({});
+  const [applicabilityReasons, setApplicabilityReasons] = useState<ApplicabilityReasonValues>({});
   const [projectId, setProjectId] = useState(1);
   const [projectPhases, setProjectPhases] = useState<ProjectPhaseConfig[]>([]);
   const [weeklyEntries, setWeeklyEntries] = useState<WeeklyEntry[]>([]);
@@ -231,22 +240,49 @@ export function WeeklyInputPanel({
     return projectPhases.length > 0 && !phaseForWeek(dateText);
   }
 
+  function isPhaseEntryOutsidePlannedDates(dateText: string, phaseName: string) {
+    const selected = parseDate(dateText).getTime();
+    const phaseConfig = projectPhases.find((phase) => phase.name === phaseName);
+    if (!phaseConfig?.start_date || !phaseConfig.end_date) return false;
+    return selected < parseDate(phaseConfig.start_date).getTime() || selected > parseDate(phaseConfig.end_date).getTime();
+  }
+
   function calendarCellClass(dateText: string) {
     const hasData = Boolean(entriesByCalendarWeek.get(dateText)?.length);
-    if (isBeyondConfiguredPhase(dateText)) {
+    if (!hasData && isBeyondConfiguredPhase(dateText)) {
       return "weekly-calendar-cell weekly-calendar-red";
     }
     return hasData ? "weekly-calendar-cell weekly-calendar-green" : "weekly-calendar-cell weekly-calendar-grey";
   }
 
-  function enteredPhasesForWeek(dateText: string) {
+  function phaseAbbreviation(phaseName: string) {
+    const knownAbbreviations: Record<string, string> = {
+      "Requirement Analysis": "RA",
+      "Solution Design": "SD",
+      "Sprint Development": "SP",
+      Testing: "TE",
+      "Deployment Readiness": "DR",
+    };
+    if (knownAbbreviations[phaseName]) return knownAbbreviations[phaseName];
+    const words = phaseName.split(/\s+/).filter(Boolean);
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return words.map((word) => word[0]).join("").slice(0, 2).toUpperCase();
+  }
+
+  function enteredPhaseBadgesForWeek(dateText: string) {
     const phases = new Set(
       (entriesByCalendarWeek.get(dateText) ?? [])
         .map((entry) => entry.kpi?.phase)
         .filter(Boolean) as string[],
     );
-    return Array.from(phases).join(", ");
+    return Array.from(phases).map((phase) => ({
+      name: phase,
+      abbreviation: phaseAbbreviation(phase),
+      outsidePlan: isPhaseEntryOutsidePlannedDates(dateText, phase),
+    }));
   }
+
+  const selectedWeekEntries = entriesByCalendarWeek.get(weekStart) ?? [];
 
   useEffect(() => {
     if (!calendarWeeks.length) return;
@@ -263,13 +299,19 @@ export function WeeklyInputPanel({
     const entryByCode = new Map(entriesForWeek.map((entry) => [entry.kpi?.code, entry]));
     const nextValues = getDefaultComponentValues(kpis);
     const nextNotes: NotesValues = {};
+    const nextApplicability: ApplicabilityValues = {};
+    const nextReasons: ApplicabilityReasonValues = {};
     kpis.forEach((kpi) => {
       const entry = (kpi.id ? entryByKpiId.get(kpi.id) : undefined) ?? entryByCode.get(kpi.code);
       nextValues[kpi.code] = entryComponentValues(kpi, entry);
       nextNotes[kpi.code] = entry?.notes ?? "";
+      nextApplicability[kpi.code] = entry?.applicability_status ?? "applicable";
+      nextReasons[kpi.code] = entry?.applicability_reason ?? "";
     });
     setComponentValues(nextValues);
     setNotesValues(nextNotes);
+    setApplicabilityValues(nextApplicability);
+    setApplicabilityReasons(nextReasons);
     const activePhase = phaseForWeek(weekStart);
     if (activePhase && orderedPhases.includes(activePhase.name)) {
       setSelectedPhase(activePhase.name);
@@ -291,18 +333,61 @@ export function WeeklyInputPanel({
     setNotesValues((current) => ({ ...current, [kpiCode]: value }));
   }
 
+  function updateApplicability(kpiCode: string, value: "applicable" | "not_relevant") {
+    setApplicabilityValues((current) => ({ ...current, [kpiCode]: value }));
+    if (value === "applicable") {
+      setApplicabilityReasons((current) => ({ ...current, [kpiCode]: "" }));
+    }
+  }
+
+  function updateApplicabilityReason(kpiCode: string, value: string) {
+    setApplicabilityReasons((current) => ({ ...current, [kpiCode]: value }));
+  }
+
   async function saveWeek() {
     const entries = phaseKpis.filter((kpi) => kpi.id).map((kpi) => ({
       project_id: projectId,
       kpi_id: kpi.id,
       week_start: weekStart,
       component_values: componentValues[kpi.code] ?? {},
+      applicability_status: applicabilityValues[kpi.code] ?? "applicable",
+      applicability_reason: applicabilityValues[kpi.code] === "not_relevant" ? applicabilityReasons[kpi.code] ?? "" : null,
       notes: notesValues[kpi.code] ?? "",
     }));
     await Promise.all(entries.map((entry) => apiSend<WeeklyEntry>("/api/v1/weekly-entries/", "POST", entry)));
     const refreshed = await apiGet<WeeklyEntry[]>(`/api/v1/weekly-entries/?project_id=${projectId}`);
     setWeeklyEntries(refreshed);
     setSaveStatus("Saved weekly data");
+  }
+
+  async function deleteSelectedWeekEntries() {
+    const entriesForWeek = entriesByCalendarWeek.get(weekStart) ?? [];
+    if (!entriesForWeek.length) {
+      setSaveStatus("No saved entries for selected week");
+      return;
+    }
+
+    const weekLabel = formatCalendarLabel(weekStart);
+    const firstConfirmed = window.confirm(
+      `Delete all KPI entries for ${weekLabel}? This will remove ${entriesForWeek.length} saved KPI records for the selected week.`,
+    );
+    if (!firstConfirmed) return;
+
+    const secondConfirmed = window.confirm(
+      `Final confirmation: permanently delete weekly KPI entries for ${weekLabel}? This cannot be undone.`,
+    );
+    if (!secondConfirmed) return;
+
+    const savedDates = entriesForWeek.map((entry) => entry.week_start).sort();
+    const params = new URLSearchParams({
+      project_id: String(projectId),
+      start_date: savedDates[0],
+      end_date: savedDates[savedDates.length - 1],
+    });
+    await apiDelete(`/api/v1/weekly-entries/?${params.toString()}`);
+    const refreshed = await apiGet<WeeklyEntry[]>(`/api/v1/weekly-entries/?project_id=${projectId}`);
+    setWeeklyEntries(refreshed);
+    setSaveStatus(`Deleted weekly data for ${weekLabel}`);
   }
 
   return (
@@ -333,25 +418,48 @@ export function WeeklyInputPanel({
             <strong>Weekly calendar</strong>
             <span>{saveStatus}</span>
           </div>
-          <div className="weekly-calendar-legend">
-            <span><b className="legend-dot legend-green" />Data available</span>
-            <span><b className="legend-dot weekly-legend-grey" />No data</span>
-            <span><b className="legend-dot legend-red" />Beyond phase dates</span>
+          <div className="weekly-calendar-actions">
+            <div className="weekly-calendar-legend">
+              <span><b className="legend-dot legend-green" />Data available</span>
+              <span><b className="legend-dot weekly-legend-grey" />No data</span>
+              <span><b className="legend-dot legend-red" />Phase entry outside dates</span>
+            </div>
+            <button
+              className="danger-button"
+              disabled={!selectedWeekEntries.length}
+              onClick={deleteSelectedWeekEntries}
+              type="button"
+            >
+              Delete selected week
+            </button>
           </div>
         </div>
         <div className="weekly-calendar-grid">
-          {calendarWeeks.map((dateText) => (
-            <button
-              className={`${calendarCellClass(dateText)}${weekStart === dateText ? " weekly-calendar-selected" : ""}`}
-              key={dateText}
-              onClick={() => onWeekStartChange(dateText)}
-              type="button"
-            >
-              <strong>{formatCalendarLabel(dateText)}</strong>
-              <span>Wed</span>
-              <small>{enteredPhasesForWeek(dateText)}</small>
-            </button>
-          ))}
+          {calendarWeeks.map((dateText) => {
+            const phaseBadges = enteredPhaseBadgesForWeek(dateText);
+            return (
+              <button
+                className={`${calendarCellClass(dateText)}${weekStart === dateText ? " weekly-calendar-selected" : ""}`}
+                key={dateText}
+                onClick={() => onWeekStartChange(dateText)}
+                type="button"
+              >
+                <strong>{formatCalendarLabel(dateText)}</strong>
+                <span>Wed</span>
+                <small className="weekly-phase-badges">
+                  {phaseBadges.map((phase) => (
+                    <b
+                      className={phase.outsidePlan ? "weekly-phase-badge weekly-phase-badge-red" : "weekly-phase-badge weekly-phase-badge-green"}
+                      key={phase.name}
+                      title={phase.name}
+                    >
+                      {phase.abbreviation}
+                    </b>
+                  ))}
+                </small>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -418,6 +526,7 @@ export function WeeklyInputPanel({
                   <th>Weight</th>
                   <th>Trend</th>
                   <th>Threshold</th>
+                  <th>Applicability</th>
                   <th>Formula components</th>
                   <th>Calculated</th>
                   <th>Notes</th>
@@ -442,12 +551,33 @@ export function WeeklyInputPanel({
                       />
                     </td>
                     <td>
+                      <div className="applicability-cell">
+                        <select
+                          aria-label={`${kpi.metric} applicability`}
+                          onChange={(event) => updateApplicability(kpi.code, event.target.value as "applicable" | "not_relevant")}
+                          value={applicabilityValues[kpi.code] ?? "applicable"}
+                        >
+                          <option value="applicable">Applicable</option>
+                          <option value="not_relevant">Not relevant</option>
+                        </select>
+                        {applicabilityValues[kpi.code] === "not_relevant" ? (
+                          <input
+                            aria-label={`${kpi.metric} not relevant reason`}
+                            onChange={(event) => updateApplicabilityReason(kpi.code, event.target.value)}
+                            placeholder="Reason"
+                            value={applicabilityReasons[kpi.code] ?? ""}
+                          />
+                        ) : null}
+                      </div>
+                    </td>
+                    <td>
                       <div className="component-grid">
                         {kpi.formulaComponents.map((component) => (
                           <label key={`${kpi.code}-${component.key}`}>
                             {component.label}
                             <input
                               aria-label={`${kpi.metric} ${component.label}`}
+                              disabled={(applicabilityValues[kpi.code] ?? "applicable") === "not_relevant"}
                               inputMode="decimal"
                               onChange={(event) =>
                                 updateComponentValue(kpi.code, component.key, event.target.value)
@@ -460,8 +590,9 @@ export function WeeklyInputPanel({
                     </td>
                     <td>
                       <span className="calculated-value">
-                        {calculateValue(kpi, componentValues[kpi.code] ?? {})}
-                        {kpi.formula.includes("/") ? "%" : ""}
+                        {(applicabilityValues[kpi.code] ?? "applicable") === "not_relevant"
+                          ? "N/A"
+                          : `${calculateValue(kpi, componentValues[kpi.code] ?? {})}${kpi.formula.includes("/") ? "%" : ""}`}
                       </span>
                     </td>
                     <td>

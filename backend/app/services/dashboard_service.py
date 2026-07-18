@@ -17,6 +17,7 @@ from app.schemas.dashboard import (
     DimensionHealthRead,
     HeatmapCellRead,
     HeatmapKpiRead,
+    HeatmapKpiScoreRead,
     HeatmapKpiValueRead,
     KpiHealthRead,
     KpiTrendPoint,
@@ -24,6 +25,8 @@ from app.schemas.dashboard import (
     ProjectHealthRead,
     ScoreTrendPointRead,
 )
+
+HeatmapPoint = tuple[date, float, str, Optional[str]]
 
 
 def get_project_health(db: Session, project_id: int) -> ProjectHealthRead:
@@ -49,12 +52,17 @@ def get_project_heatmap(
     project_id: int,
     mode: str = "latest",
     week_start: Optional[str] = None,
+    period_mode: str = "entire",
+    start_week: Optional[str] = None,
+    end_week: Optional[str] = None,
 ) -> ProjectHeatmapRead:
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     if mode not in {"latest", "project_to_date"}:
         raise HTTPException(status_code=400, detail="Mode must be latest or project_to_date")
+    if period_mode not in {"entire", "range"}:
+        raise HTTPException(status_code=400, detail="Period mode must be entire or range")
 
     active_kpis = list(db.scalars(select(KpiDefinition).where(KpiDefinition.is_active.is_(True))))
     entries = list(
@@ -72,6 +80,13 @@ def get_project_heatmap(
     selected_week = latest_week
     if week_start:
         selected_week = date.fromisoformat(week_start)
+    range_start = date.fromisoformat(start_week) if start_week else None
+    range_end = date.fromisoformat(end_week) if end_week else None
+    if period_mode == "range":
+        if range_start is None or range_end is None:
+            raise HTTPException(status_code=400, detail="Start week and end week are required for range mode")
+        if range_start > range_end:
+            raise HTTPException(status_code=400, detail="Start week must be before or equal to end week")
 
     phases = [
         phase.name
@@ -114,27 +129,34 @@ def get_project_heatmap(
     by_kpi: dict[int, list[WeeklyKpiEntry]] = defaultdict(list)
     for entry in entries:
         by_kpi[entry.kpi_id].append(entry)
+    fallback_weeks = [date(2026, 6, 22), date(2026, 6, 29), date(2026, 7, 6), date(2026, 7, 13)]
+    all_weeks = sorted({entry.week_start for entry in entries}) or fallback_weeks
+    score_weeks = _filter_weeks_for_period(all_weeks, period_mode, range_start, range_end)
 
     for kpi in active_kpis:
         bucket = buckets[(kpi.phase, kpi.health_dimension)]
         bucket["total"] += 1
-        points = _heatmap_points_for_kpi(kpi, by_kpi.get(kpi.id, []))
-        has_threshold_breach = _has_threshold_breach(kpi, points, mode, selected_week)
+        points = _filter_points_for_period(
+            _heatmap_points_for_kpi(kpi, by_kpi.get(kpi.id, [])),
+            period_mode,
+            range_start,
+            range_end,
+        )
+        has_threshold_breach = _has_threshold_breach(kpi, points, period_mode)
         bucket_kpis[(kpi.phase, kpi.health_dimension)].append(
-            _build_heatmap_kpi(kpi, points, has_threshold_breach)
+            _build_heatmap_kpi(kpi, points, has_threshold_breach, score_weeks)
         )
         if kpi.threshold is not None:
             bucket["monitored"] += 1
             if has_threshold_breach:
                 bucket["threshold_breach"] += 1
-            if _has_monitor_breach(kpi, points, mode, selected_week):
+            if _has_monitor_breach(kpi, points):
                 bucket["monitor_breach"] += 1
 
-        for index, point in enumerate(points):
-            prior = points[index - 1] if index > 0 else None
-            if mode == "latest" and point[0] != selected_week:
-                continue
-            if mode == "project_to_date" and prior is None:
+        applicable_points = [point for point in points if point[2] == "applicable"]
+        for index, point in enumerate(applicable_points):
+            prior = applicable_points[index - 1] if index > 0 else None
+            if prior is None:
                 continue
 
             status = _trend_status(kpi.expected_trend, point[1], prior[1] if prior else None)
@@ -171,10 +193,22 @@ def get_project_heatmap(
         project_name=project.name,
         mode=mode,
         week_start=selected_week,
+        period_mode=period_mode,
+        start_week=range_start,
+        end_week=range_end,
         phases=phases,
         health_dimensions=dimensions,
         health_dimension_scores=health_dimension_scores,
-        score_trend=_build_score_trend(active_kpis, by_kpi, phases, dimensions, health_dimension_scores),
+        score_trend=_build_score_trend(
+            active_kpis,
+            by_kpi,
+            phases,
+            dimensions,
+            health_dimension_scores,
+            period_mode,
+            range_start,
+            range_end,
+        ),
         cells=cells,
     )
 
@@ -223,8 +257,10 @@ def _build_kpi_health(entries: list[WeeklyKpiEntry]) -> KpiHealthRead:
                 week_start=entry.week_start,
                 value=entry.value,
                 previous_value=prior.value if prior else None,
-                status=_trend_status(kpi.expected_trend, entry.value, prior.value if prior else None),
+                status="grey" if entry.applicability_status == "not_relevant" else _trend_status(kpi.expected_trend, entry.value, prior.value if prior else None),
                 delta=round(entry.value - prior.value, 4) if prior else None,
+                applicability_status=entry.applicability_status,
+                applicability_reason=entry.applicability_reason,
             )
         )
 
@@ -268,40 +304,116 @@ def _threshold_breached(kpi: KpiDefinition, value: float) -> bool:
 def _heatmap_points_for_kpi(
     kpi: KpiDefinition,
     entries: list[WeeklyKpiEntry],
-) -> list[tuple[date, float]]:
+) -> list[HeatmapPoint]:
     if entries:
-        return [(entry.week_start, entry.value) for entry in sorted(entries, key=lambda entry: entry.week_start)]
+        return [
+            (
+                entry.week_start,
+                entry.value,
+                entry.applicability_status or "applicable",
+                entry.applicability_reason,
+            )
+            for entry in sorted(entries, key=lambda entry: entry.week_start)
+        ]
 
     values = [18, 15, 13, 11] if kpi.expected_trend == "negative" else [62, 70, 78, 84]
     weeks = [date(2026, 6, 22), date(2026, 6, 29), date(2026, 7, 6), date(2026, 7, 13)]
-    return list(zip(weeks, values))
+    return [(week, value, "applicable", None) for week, value in zip(weeks, values)]
+
+
+def _filter_weeks_for_period(
+    weeks: list[date],
+    period_mode: str,
+    start_week: Optional[date],
+    end_week: Optional[date],
+) -> list[date]:
+    if period_mode != "range":
+        return weeks
+    return [week for week in weeks if (start_week is None or week >= start_week) and (end_week is None or week <= end_week)]
+
+
+def _filter_points_for_period(
+    points: list[HeatmapPoint],
+    period_mode: str,
+    start_week: Optional[date],
+    end_week: Optional[date],
+) -> list[HeatmapPoint]:
+    return [
+        point
+        for point in points
+        if period_mode != "range" or (
+            (start_week is None or point[0] >= start_week) and (end_week is None or point[0] <= end_week)
+        )
+    ]
+
+
+def _display_value_for_kpi(kpi: KpiDefinition, value: float) -> float:
+    has_ratio_formula = any(
+        component.get("role") == "numerator"
+        for component in kpi.formula_components or []
+    ) and any(
+        component.get("role") == "denominator"
+        for component in kpi.formula_components or []
+    )
+    return round(value * 100, 1) if has_ratio_formula and abs(value) <= 1 else value
 
 
 def _build_heatmap_kpi(
     kpi: KpiDefinition,
-    points: list[tuple[date, float]],
+    points: list[HeatmapPoint],
     has_threshold_breach: bool,
+    score_weeks: list[date],
 ) -> HeatmapKpiRead:
+    points_by_week = {week_start: (value, applicability_status, reason) for week_start, value, applicability_status, reason in points}
+
     return HeatmapKpiRead(
+        code=kpi.code,
+        category=kpi.category,
         metric=kpi.metric,
+        expected_trend=kpi.expected_trend,
+        monitor_period_weeks=kpi.monitor_period_weeks,
         threshold=kpi.threshold,
         has_threshold_breach=has_threshold_breach,
+        trend_values=[
+            HeatmapKpiValueRead(
+                week_start=week_start,
+                value=value,
+                display_value=_display_value_for_kpi(kpi, value),
+                status="grey" if applicability_status == "not_relevant" else ("red" if _threshold_breached(kpi, value) else "green"),
+                applicability_status=applicability_status,
+                applicability_reason=reason,
+            )
+            for week_start, value, applicability_status, reason in points
+        ],
         last_values=[
             HeatmapKpiValueRead(
                 week_start=week_start,
                 value=value,
-                status="red" if _threshold_breached(kpi, value) else "green",
+                display_value=_display_value_for_kpi(kpi, value),
+                status="grey" if applicability_status == "not_relevant" else ("red" if _threshold_breached(kpi, value) else "green"),
+                applicability_status=applicability_status,
+                applicability_reason=reason,
             )
-            for week_start, value in points[-3:]
+            for week_start, value, applicability_status, reason in points[-3:]
+        ],
+        score_values=[
+            HeatmapKpiScoreRead(
+                week_start=week_start,
+                score=None if week_start not in points_by_week or points_by_week[week_start][1] == "not_relevant" else (
+                    0 if _threshold_breached(kpi, points_by_week[week_start][0]) else 1
+                ),
+                status="grey" if week_start not in points_by_week or points_by_week[week_start][1] == "not_relevant" else (
+                    "red" if _threshold_breached(kpi, points_by_week[week_start][0]) else "green"
+                ),
+            )
+            for week_start in score_weeks
         ],
     )
 
 
 def _has_monitor_breach(
     kpi: KpiDefinition,
-    points: list[tuple[date, float]],
-    mode: str,
-    selected_week: Optional[date],
+    points: list[HeatmapPoint],
 ) -> bool:
     if kpi.threshold is None:
         return False
@@ -311,42 +423,28 @@ def _has_monitor_breach(
         return False
 
     ordered_points = sorted(points, key=lambda point: point[0])
-    if mode == "latest":
-        if selected_week is None:
-            selected_points = ordered_points
-        else:
-            selected_points = [point for point in ordered_points if point[0] <= selected_week]
-        if len(selected_points) < monitor_period:
-            return False
-        window = selected_points[-monitor_period:]
-        return all(_threshold_breached(kpi, point[1]) for point in window)
+    if len(ordered_points) < monitor_period:
+        return False
 
     for index in range(monitor_period, len(ordered_points) + 1):
         window = ordered_points[index - monitor_period:index]
-        if all(_threshold_breached(kpi, point[1]) for point in window):
+        if all(point[2] == "applicable" and _threshold_breached(kpi, point[1]) for point in window):
             return True
     return False
 
 
 def _has_threshold_breach(
     kpi: KpiDefinition,
-    points: list[tuple[date, float]],
-    mode: str,
-    selected_week: Optional[date],
+    points: list[HeatmapPoint],
+    period_mode: str,
 ) -> bool:
     if kpi.threshold is None:
         return False
 
     ordered_points = sorted(points, key=lambda point: point[0])
-    if mode == "latest":
-        selected_points = ordered_points if selected_week is None else [
-            point for point in ordered_points if point[0] <= selected_week
-        ]
-        if not selected_points:
-            return False
-        return _threshold_breached(kpi, selected_points[-1][1])
-
-    return any(_threshold_breached(kpi, point[1]) for point in ordered_points)
+    if not ordered_points:
+        return False
+    return any(point[2] == "applicable" and _threshold_breached(kpi, point[1]) for point in ordered_points)
 
 
 def _build_score_trend(
@@ -355,12 +453,20 @@ def _build_score_trend(
     phases: list[str],
     dimensions: list[str],
     dimension_scores: dict[str, float],
+    period_mode: str,
+    start_week: Optional[date],
+    end_week: Optional[date],
 ) -> list[ScoreTrendPointRead]:
     kpi_points = {
-        kpi.id: _heatmap_points_for_kpi(kpi, by_kpi.get(kpi.id, []))
+        kpi.id: _filter_points_for_period(
+            _heatmap_points_for_kpi(kpi, by_kpi.get(kpi.id, [])),
+            period_mode,
+            start_week,
+            end_week,
+        )
         for kpi in kpis
     }
-    weeks = sorted({week_start for points in kpi_points.values() for week_start, _ in points})
+    weeks = sorted({week_start for points in kpi_points.values() for week_start, *_ in points})
     if not weeks:
         return []
 
@@ -379,7 +485,11 @@ def _build_score_trend(
                     score += dimension_score
                     continue
                 has_breach = any(
-                    _has_threshold_breach(kpi, kpi_points[kpi.id], "latest", week)
+                    _has_threshold_breach(
+                        kpi,
+                        [point for point in kpi_points[kpi.id] if point[0] <= week],
+                        "entire",
+                    )
                     for kpi in bucket_kpis
                 )
                 if not has_breach:

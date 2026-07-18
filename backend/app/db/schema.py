@@ -21,6 +21,13 @@ def ensure_runtime_columns() -> None:
     if "component_values" not in entry_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE weekly_kpi_entries ADD COLUMN component_values JSON DEFAULT '{}'"))
+    if "applicability_status" not in entry_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE weekly_kpi_entries ADD COLUMN applicability_status VARCHAR(30) DEFAULT 'applicable'"))
+            connection.execute(text("UPDATE weekly_kpi_entries SET applicability_status = 'applicable' WHERE applicability_status IS NULL"))
+    if "applicability_reason" not in entry_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE weekly_kpi_entries ADD COLUMN applicability_reason VARCHAR(500)"))
 
     project_columns = {column["name"] for column in inspector.get_columns("projects")}
     project_additions = {

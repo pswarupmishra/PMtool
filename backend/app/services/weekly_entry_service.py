@@ -32,9 +32,19 @@ def upsert_entry(db: Session, entry: WeeklyKpiEntryCreate) -> WeeklyKpiEntry:
         raise HTTPException(status_code=404, detail="KPI definition not found")
 
     entry_data = entry.model_dump()
-    entry_data["value"] = entry.value if entry.value is not None else calculate_kpi_value(kpi, entry.component_values)
-    entry_data["numerator"] = _component_value_for_role(kpi, entry.component_values, "numerator")
-    entry_data["denominator"] = _component_value_for_role(kpi, entry.component_values, "denominator")
+    if entry.applicability_status not in {"applicable", "not_relevant"}:
+        raise HTTPException(status_code=400, detail="Applicability status must be applicable or not_relevant")
+
+    if entry.applicability_status == "not_relevant":
+        entry_data["value"] = entry.value if entry.value is not None else 0
+        entry_data["numerator"] = None
+        entry_data["denominator"] = None
+        entry_data["component_values"] = entry.component_values or {}
+    else:
+        entry_data["value"] = entry.value if entry.value is not None else calculate_kpi_value(kpi, entry.component_values)
+        entry_data["numerator"] = _component_value_for_role(kpi, entry.component_values, "numerator")
+        entry_data["denominator"] = _component_value_for_role(kpi, entry.component_values, "denominator")
+        entry_data["applicability_reason"] = None
 
     db_entry = db.scalar(
         select(WeeklyKpiEntry).where(
