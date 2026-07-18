@@ -7,6 +7,7 @@ const documentSections = [
       "Maintain project phases in the phase grid. Each phase should have a start date, end date, sort order, and active status.",
       "Create or update health dimensions. The Score % field is used by the weighted score heatmap.",
       "Configure KPIs by phase tab and health dimension. Define formula, expected trend, threshold, and monitor period.",
+      "Once weekly input exists, the related project metadata, phase, health dimension, and KPI configuration are locked from update/delete to protect historical reporting integrity.",
     ],
   },
   {

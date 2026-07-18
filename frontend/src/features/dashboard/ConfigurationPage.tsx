@@ -104,6 +104,7 @@ export function ConfigurationPage({ onKpisChanged }: ConfigurationPageProps) {
   const [resetStartDate, setResetStartDate] = useState("");
   const [resetEndDate, setResetEndDate] = useState("");
   const [resetStatus, setResetStatus] = useState("");
+  const [configStatus, setConfigStatus] = useState("");
 
   const selectedProject = projects[0];
   const activeDimensions = useMemo(() => dimensions.filter((dimension) => dimension.is_active), [dimensions]);
@@ -169,9 +170,18 @@ export function ConfigurationPage({ onKpisChanged }: ConfigurationPageProps) {
     }));
   }
 
+  function showConfigError(error: unknown) {
+    setConfigStatus(error instanceof Error ? error.message : "Configuration action failed.");
+  }
+
   async function saveProject(project: ProjectConfig) {
-    const updated = await apiSend<ProjectConfig>(`/api/v1/projects/${project.id}`, "PATCH", project);
-    setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    try {
+      const updated = await apiSend<ProjectConfig>(`/api/v1/projects/${project.id}`, "PATCH", project);
+      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setConfigStatus("Project metadata updated.");
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function addDimension() {
@@ -189,15 +199,25 @@ export function ConfigurationPage({ onKpisChanged }: ConfigurationPageProps) {
   }
 
   async function updateDimension(dimension: HealthDimension) {
-    const updated = await apiSend<HealthDimension>(`/api/v1/health-dimensions/${dimension.id}`, "PATCH", dimension);
-    setDimensions((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    try {
+      const updated = await apiSend<HealthDimension>(`/api/v1/health-dimensions/${dimension.id}`, "PATCH", dimension);
+      setDimensions((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setConfigStatus("Health dimension updated.");
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function deleteDimension(dimensionId: number) {
-    await apiDelete(`/api/v1/health-dimensions/${dimensionId}`);
-    setDimensions((current) =>
-      current.map((item) => (item.id === dimensionId ? { ...item, is_active: false } : item)),
-    );
+    try {
+      await apiDelete(`/api/v1/health-dimensions/${dimensionId}`);
+      setDimensions((current) =>
+        current.map((item) => (item.id === dimensionId ? { ...item, is_active: false } : item)),
+      );
+      setConfigStatus("Health dimension deleted.");
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function addPhase() {
@@ -217,17 +237,27 @@ export function ConfigurationPage({ onKpisChanged }: ConfigurationPageProps) {
   }
 
   async function updatePhase(phase: ProjectPhaseConfig) {
-    const updated = await apiSend<ProjectPhaseConfig>(`/api/v1/project-phases/${phase.id}`, "PATCH", phase);
-    setProjectPhases((current) =>
-      current.map((item) => (item.id === updated.id ? updated : item)).sort((a, b) => a.sort_order - b.sort_order),
-    );
+    try {
+      const updated = await apiSend<ProjectPhaseConfig>(`/api/v1/project-phases/${phase.id}`, "PATCH", phase);
+      setProjectPhases((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)).sort((a, b) => a.sort_order - b.sort_order),
+      );
+      setConfigStatus("Project phase updated.");
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function deletePhase(phaseId: number) {
-    await apiDelete(`/api/v1/project-phases/${phaseId}`);
-    setProjectPhases((current) =>
-      current.map((item) => (item.id === phaseId ? { ...item, is_active: false } : item)),
-    );
+    try {
+      await apiDelete(`/api/v1/project-phases/${phaseId}`);
+      setProjectPhases((current) =>
+        current.map((item) => (item.id === phaseId ? { ...item, is_active: false } : item)),
+      );
+      setConfigStatus("Project phase deleted.");
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function addKpi() {
@@ -247,18 +277,28 @@ export function ConfigurationPage({ onKpisChanged }: ConfigurationPageProps) {
   }
 
   async function updateKpi(kpi: ApiKpi) {
-    const updated = await apiSend<ApiKpi>(`/api/v1/kpis/${kpi.id}`, "PATCH", {
-      ...kpi,
-      formula_components: componentsForFormula(kpi.formula),
-    });
-    setKpis((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-    onKpisChanged?.();
+    try {
+      const updated = await apiSend<ApiKpi>(`/api/v1/kpis/${kpi.id}`, "PATCH", {
+        ...kpi,
+        formula_components: componentsForFormula(kpi.formula),
+      });
+      setKpis((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setConfigStatus("KPI configuration updated.");
+      onKpisChanged?.();
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function deleteKpi(kpiId: number) {
-    await apiDelete(`/api/v1/kpis/${kpiId}`);
-    setKpis((current) => current.filter((item) => item.id !== kpiId));
-    onKpisChanged?.();
+    try {
+      await apiDelete(`/api/v1/kpis/${kpiId}`);
+      setKpis((current) => current.filter((item) => item.id !== kpiId));
+      setConfigStatus("KPI configuration deleted.");
+      onKpisChanged?.();
+    } catch (error) {
+      showConfigError(error);
+    }
   }
 
   async function deleteWeeklyInputs(scope: "all" | "period") {
@@ -301,6 +341,7 @@ export function ConfigurationPage({ onKpisChanged }: ConfigurationPageProps) {
             <h2>Project metadata</h2>
           </div>
         </div>
+        {configStatus ? <p className={configStatus.includes("locked") ? "config-status config-status-error" : "config-status"}>{configStatus}</p> : null}
         <div className="config-grid">
           {projects.map((project) => (
             <article className="config-card" key={project.id}>

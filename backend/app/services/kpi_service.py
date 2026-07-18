@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.kpi import KpiDefinition
 from app.schemas.kpi import KpiDefinitionCreate, KpiDefinitionUpdate
+from app.services.metadata_lock_service import has_kpi_weekly_entries
 
 
 def list_kpis(db: Session, active_only: bool = False) -> list[KpiDefinition]:
@@ -25,6 +26,11 @@ def update_kpi(db: Session, kpi_id: int, kpi: KpiDefinitionUpdate) -> KpiDefinit
     db_kpi = db.get(KpiDefinition, kpi_id)
     if db_kpi is None:
         raise HTTPException(status_code=404, detail="KPI definition not found")
+    if has_kpi_weekly_entries(db, kpi_id):
+        raise HTTPException(
+            status_code=409,
+            detail="KPI configuration is locked because weekly KPI entries already exist for this KPI.",
+        )
 
     for field, value in kpi.model_dump(exclude_unset=True).items():
         setattr(db_kpi, field, value)
@@ -38,5 +44,10 @@ def delete_kpi(db: Session, kpi_id: int) -> None:
     db_kpi = db.get(KpiDefinition, kpi_id)
     if db_kpi is None:
         raise HTTPException(status_code=404, detail="KPI definition not found")
+    if has_kpi_weekly_entries(db, kpi_id):
+        raise HTTPException(
+            status_code=409,
+            detail="KPI configuration is locked because weekly KPI entries already exist for this KPI.",
+        )
     db_kpi.is_active = False
     db.commit()

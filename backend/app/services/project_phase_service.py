@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.project import Project
 from app.models.project_phase import ProjectPhase
 from app.schemas.project_phase import ProjectPhaseCreate, ProjectPhaseUpdate
+from app.services.metadata_lock_service import has_phase_weekly_entries
 
 
 def list_project_phases(
@@ -36,6 +37,11 @@ def update_project_phase(db: Session, phase_id: int, phase: ProjectPhaseUpdate) 
     db_phase = db.get(ProjectPhase, phase_id)
     if db_phase is None:
         raise HTTPException(status_code=404, detail="Project phase not found")
+    if has_phase_weekly_entries(db, db_phase.project_id, db_phase.name):
+        raise HTTPException(
+            status_code=409,
+            detail="Project phase is locked because weekly KPI entries already exist for this phase.",
+        )
     for field, value in phase.model_dump(exclude_unset=True).items():
         setattr(db_phase, field, value)
     db.commit()
@@ -47,5 +53,10 @@ def delete_project_phase(db: Session, phase_id: int) -> None:
     db_phase = db.get(ProjectPhase, phase_id)
     if db_phase is None:
         raise HTTPException(status_code=404, detail="Project phase not found")
+    if has_phase_weekly_entries(db, db_phase.project_id, db_phase.name):
+        raise HTTPException(
+            status_code=409,
+            detail="Project phase is locked because weekly KPI entries already exist for this phase.",
+        )
     db_phase.is_active = False
     db.commit()
