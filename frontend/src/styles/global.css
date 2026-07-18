@@ -583,6 +583,168 @@ select {
   line-height: 1.45;
 }
 
+.er-diagram-wrap {
+  background: #f8fafc;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  overflow-x: auto;
+  padding: 16px;
+}
+
+.er-diagram {
+  min-height: 560px;
+  min-width: 960px;
+  position: relative;
+  user-select: none;
+}
+
+.er-flow-lines {
+  height: 560px;
+  inset: 0;
+  position: absolute;
+  width: 960px;
+  z-index: 0;
+}
+
+.er-flow-lines path {
+  fill: none;
+  marker-end: url("#er-arrow");
+  stroke: #9fb6ce;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.er-flow-lines marker path {
+  fill: #9fb6ce;
+  marker-end: none;
+  stroke: none;
+}
+
+.er-card {
+  background: #ffffff;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  cursor: grab;
+  display: grid;
+  gap: 5px;
+  position: absolute;
+  width: 220px;
+  padding: 12px;
+  touch-action: none;
+  z-index: 1;
+}
+
+.er-card:active,
+.er-card-dragging {
+  box-shadow: 0 10px 24px rgba(3, 25, 51, 0.16);
+  cursor: grabbing;
+  z-index: 3;
+}
+
+.er-card strong {
+  border-bottom: 1px solid #e5eaf0;
+  color: #17202a;
+  font-size: 13px;
+  padding-bottom: 7px;
+}
+
+.er-card span {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.er-card span b {
+  color: #0057b8;
+  font-size: 11px;
+}
+
+.er-card-project {
+  border-top: 3px solid #155eef;
+}
+
+.er-card-phases {
+  border-top: 3px solid #2aa7df;
+}
+
+.er-card-tasks {
+  border-top: 3px solid #98a2b3;
+}
+
+.er-card-kpi {
+  border-top: 3px solid #df1f2d;
+}
+
+.er-card-dimensions {
+  border-top: 3px solid #12b76a;
+}
+
+.er-card-weekly {
+  border-top: 3px solid #f79009;
+}
+
+.er-connector {
+  background: #eef7ff;
+  border: 1px solid #b7d9f7;
+  border-radius: 999px;
+  color: #0057b8;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 5px 8px;
+  position: absolute;
+  z-index: 2;
+}
+
+.er-connector-project-phases {
+  left: 92px;
+  top: 190px;
+}
+
+.er-connector-project-tasks {
+  left: 92px;
+  top: 344px;
+}
+
+.er-connector-project-weekly {
+  left: 278px;
+  top: 214px;
+}
+
+.er-connector-kpi-weekly {
+  left: 482px;
+  top: 226px;
+}
+
+.er-connector-kpi-phase {
+  left: 270px;
+  top: 86px;
+}
+
+.er-connector-kpi-dimension {
+  left: 626px;
+  top: 188px;
+}
+
+.er-notes {
+  display: grid;
+  gap: 8px;
+}
+
+.er-notes span {
+  background: #ffffff;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  color: #344054;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.er-notes strong {
+  color: #17202a;
+}
+
 .doc-data-flow {
   display: grid;
   gap: 10px;
