@@ -281,6 +281,7 @@ export function HeatmapPage() {
   const [weeklyEntries, setWeeklyEntries] = useState<WeeklyEntry[]>([]);
   const [openInfo, setOpenInfo] = useState<"score" | "trend" | null>(null);
   const [selectedScoreCell, setSelectedScoreCell] = useState<HeatmapCell | null>(null);
+  const [activeHeatmapView, setActiveHeatmapView] = useState<"executive" | "pmo">("executive");
 
   useEffect(() => {
     const params = new URLSearchParams({ period_mode: periodMode, mode: "project_to_date" });
@@ -459,50 +460,47 @@ export function HeatmapPage() {
     <section className="panel">
       <div className="section-heading">
         <div>
-          <p>Weighted threshold score</p>
-          <div className="heatmap-title-row">
-            <h2>Score heatmap</h2>
-            <HeatmapInfoPopup
-              id="score"
-              onClose={() => setOpenInfo(null)}
-              onToggle={(infoId) => setOpenInfo((current) => current === infoId ? null : infoId)}
-              openInfo={openInfo}
-              title="Score heatmap logic"
+          <p>Project health cockpit</p>
+          <h2>{activeHeatmapView === "executive" ? "Executive Overview" : "PMO Insights"}</h2>
+          <div className="heatmap-view-tabs" role="tablist" aria-label="Heatmap view selector">
+            <button
+              aria-selected={activeHeatmapView === "executive"}
+              className={activeHeatmapView === "executive" ? "heatmap-view-tab heatmap-view-tab-active" : "heatmap-view-tab"}
+              onClick={() => setActiveHeatmapView("executive")}
+              type="button"
             >
-              <p>
-                This view converts project health into a simple score out of 5, one point for each configured project phase.
-              </p>
-              <ul>
-                <li>Each phase is scored across the configured health dimensions.</li>
-                <li>Dimension weights come from the Configuration page Score % field.</li>
-                <li>If any KPI in a cell breaches its threshold, that cell contributes 0 for that dimension.</li>
-                <li>If no KPI breaches the threshold, the cell contributes its configured weight.</li>
-                <li>If no KPI is configured for a cell, it is treated as neutral/pass and shown in grey.</li>
-              </ul>
-            </HeatmapInfoPopup>
+              Executive Overview
+            </button>
+            <button
+              aria-selected={activeHeatmapView === "pmo"}
+              className={activeHeatmapView === "pmo" ? "heatmap-view-tab heatmap-view-tab-active" : "heatmap-view-tab"}
+              onClick={() => setActiveHeatmapView("pmo")}
+              type="button"
+            >
+              PMO Insights
+            </button>
           </div>
-          <small className="heatmap-note">
-            Based on weekly input, the dashboard looks into the last x weeks as per the configured monitor period. If the threshold is breached continuously, it will be shown in the heatmap.
-          </small>
         </div>
         <div className="heatmap-heading-actions">
-          <div className="score-summary-popover" tabIndex={0}>
-            <strong className="score-summary-pill">{totalScore.toFixed(2)} / 5</strong>
-            <div className="score-trend-popup" role="tooltip">
-              <strong>Weekly weighted score</strong>
-              <div className="score-trend-bars">
-                {(heatmap?.score_trend ?? []).map((point) => (
-                  <div className="score-trend-bar-item" key={point.week_start}>
-                    <div className="score-trend-bar-track">
-                      <span style={{ height: `${Math.max(4, Math.min(100, (point.score / 5) * 100))}%` }} />
+          {activeHeatmapView === "pmo" ? (
+            <div className="score-summary-popover" tabIndex={0}>
+              <strong className="score-summary-pill">{totalScore.toFixed(2)} / 5</strong>
+              <div className="score-trend-popup" role="tooltip">
+                <strong>Weekly weighted score</strong>
+                <div className="score-trend-bars">
+                  {(heatmap?.score_trend ?? []).map((point) => (
+                    <div className="score-trend-bar-item" key={point.week_start}>
+                      <div className="score-trend-bar-track">
+                        <span style={{ height: `${Math.max(4, Math.min(100, (point.score / 5) * 100))}%` }} />
+                      </div>
+                      <small>{formatWeek(point.week_start)}</small>
+                      <b>{point.score.toFixed(2)}</b>
                     </div>
-                    <small>{formatWeek(point.week_start)}</small>
-                    <b>{point.score.toFixed(2)}</b>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
           <div className="heatmap-controls">
             <select value={periodMode} onChange={(event) => setPeriodMode(event.target.value as "entire" | "range")}>
               <option value="entire">Entire project</option>
@@ -555,67 +553,101 @@ export function HeatmapPage() {
         </div>
       ) : null}
 
-      <div className="heatmap-wrap">
-        <table className="heatmap-table score-heatmap-table">
-          <thead>
-            <tr>
-              <th>Phase</th>
-              {heatmap?.health_dimensions.map((dimension) => (
-                <th key={dimension}>
-                  {dimension}
-                  <small>{configuredDimensionScores.get(dimension) ?? 0}%</small>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {heatmap?.phases.map((phase) => (
-              <tr key={phase}>
-                <th>{phase}</th>
-                {heatmap.health_dimensions.map((dimension) => {
-                  const cell = cellMap.get(`${phase}::${dimension}`);
-                  return (
-                    <td
-                      aria-label={`${phase} ${dimension} score status`}
-                      className={scoreCellTone(cell)}
-                      key={`${phase}-${dimension}-score`}
-                      title={
-                        !cell || cell.total_count === 0
-                          ? "No KPIs configured"
-                          : cell.has_threshold_breach
-                            ? "Threshold breached"
-                            : "Healthy"
-                      }
-                    >
-                      {cell && cell.total_count > 0 ? (
-                        <>
-                          <button
-                            className="score-cell-trend-link"
-                            onClick={() => setSelectedScoreCell(cell)}
-                            type="button"
-                          >
-                            Trend
-                          </button>
-                          <div className="score-cell-metrics">
-                            {(cell.kpis ?? []).map((kpi) => (
-                              <span
-                                className={kpi.has_threshold_breach ? "score-cell-metric-breached" : undefined}
-                                key={`${phase}-${dimension}-${kpi.metric}`}
+      {activeHeatmapView === "pmo" ? (
+        <>
+          <div className="score-heatmap-header">
+            <div>
+              <p>Weighted threshold score</p>
+              <div className="heatmap-title-row">
+                <h3>Score heatmap</h3>
+                <HeatmapInfoPopup
+                  id="score"
+                  onClose={() => setOpenInfo(null)}
+                  onToggle={(infoId) => setOpenInfo((current) => current === infoId ? null : infoId)}
+                  openInfo={openInfo}
+                  title="Score heatmap logic"
+                >
+                  <p>
+                    This view converts project health into a simple score out of 5, one point for each configured project phase.
+                  </p>
+                  <ul>
+                    <li>Each phase is scored across the configured health dimensions.</li>
+                    <li>Dimension weights come from the Configuration page Score % field.</li>
+                    <li>If any KPI in a cell breaches its threshold, that cell contributes 0 for that dimension.</li>
+                    <li>If no KPI breaches the threshold, the cell contributes its configured weight.</li>
+                    <li>If no KPI is configured for a cell, it is treated as neutral/pass and shown in grey.</li>
+                  </ul>
+                </HeatmapInfoPopup>
+              </div>
+              <small className="heatmap-note">
+                Based on weekly input, the dashboard looks into the last x weeks as per the configured monitor period. If the threshold is breached continuously, it will be shown in the heatmap.
+              </small>
+            </div>
+          </div>
+
+          <div className="heatmap-wrap">
+            <table className="heatmap-table score-heatmap-table">
+              <thead>
+                <tr>
+                  <th>Phase</th>
+                  {heatmap?.health_dimensions.map((dimension) => (
+                    <th key={dimension}>
+                      {dimension}
+                      <small>{configuredDimensionScores.get(dimension) ?? 0}%</small>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {heatmap?.phases.map((phase) => (
+                  <tr key={phase}>
+                    <th>{phase}</th>
+                    {heatmap.health_dimensions.map((dimension) => {
+                      const cell = cellMap.get(`${phase}::${dimension}`);
+                      return (
+                        <td
+                          aria-label={`${phase} ${dimension} score status`}
+                          className={scoreCellTone(cell)}
+                          key={`${phase}-${dimension}-score`}
+                          title={
+                            !cell || cell.total_count === 0
+                              ? "No KPIs configured"
+                              : cell.has_threshold_breach
+                                ? "Threshold breached"
+                                : "Healthy"
+                          }
+                        >
+                          {cell && cell.total_count > 0 ? (
+                            <>
+                              <button
+                                className="score-cell-trend-link"
+                                onClick={() => setSelectedScoreCell(cell)}
+                                type="button"
                               >
-                                {kpi.metric}
-                              </span>
-                            ))}
-                          </div>
-                        </>
-                      ) : null}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                                Trend
+                              </button>
+                              <div className="score-cell-metrics">
+                                {(cell.kpis ?? []).map((kpi) => (
+                                  <span
+                                    className={kpi.has_threshold_breach ? "score-cell-metric-breached" : undefined}
+                                    key={`${phase}-${dimension}-${kpi.metric}`}
+                                  >
+                                    {kpi.metric}
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          ) : null}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
 
       {selectedScoreCell ? (
         <div className="kpi-score-modal-backdrop" role="presentation">
@@ -723,6 +755,7 @@ export function HeatmapPage() {
         </div>
       ) : null}
 
+      {activeHeatmapView === "executive" ? (
       <div className="trend-heatmap-section">
         <div className="score-heatmap-header">
           <div>
@@ -807,6 +840,7 @@ export function HeatmapPage() {
           </table>
         </div>
       </div>
+      ) : null}
     </section>
   );
 }

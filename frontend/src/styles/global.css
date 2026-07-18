@@ -1650,6 +1650,28 @@ select {
   justify-content: flex-end;
 }
 
+.heatmap-view-tabs {
+  background: #eef2f6;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 4px;
+}
+
+.heatmap-view-tab {
+  background: transparent;
+  border-radius: 6px;
+  color: #475467;
+  padding: 8px 12px;
+}
+
+.heatmap-view-tab-active {
+  background: white;
+  box-shadow: 0 1px 3px rgba(16, 24, 32, 0.12);
+  color: #155eef;
+}
+
 .heatmap-week-selector {
   margin: 0 0 18px;
 }
