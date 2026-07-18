@@ -17,9 +17,10 @@ function directionLabel(direction: KpiDefinition["expectedTrend"]) {
 }
 
 function actualTrend(points: KpiDefinition["trend"]): KpiDefinition["expectedTrend"] {
-  if (points.length < 2) return "equal";
-  const first = points[0].value;
-  const latest = points[points.length - 1].value;
+  const applicablePoints = points.filter((point) => point.applicabilityStatus !== "not_relevant" && point.status !== "grey");
+  if (applicablePoints.length < 2) return "equal";
+  const first = applicablePoints[0].rawValue ?? applicablePoints[0].value;
+  const latest = applicablePoints[applicablePoints.length - 1].rawValue ?? applicablePoints[applicablePoints.length - 1].value;
   if (latest > first) return "positive";
   if (latest < first) return "negative";
   return "equal";
@@ -52,7 +53,11 @@ function shouldMonitor(kpi: KpiDefinition) {
 
   return kpi.trend
     .slice(-monitorPeriod)
-    .every((point) => isThresholdBreached(point.value, kpi.threshold, kpi.expectedTrend));
+    .every((point) =>
+      point.applicabilityStatus !== "not_relevant" &&
+      point.status !== "grey" &&
+      isThresholdBreached(point.rawValue ?? point.value, kpi.threshold, kpi.expectedTrend),
+    );
 }
 
 function isPhaseOverdue(phase: string, weekStart: string, phaseConfigs: KpiHealthPageProps["phaseConfigs"]) {
@@ -89,6 +94,7 @@ export function KpiHealthPage({ kpis, phaseConfigs, weekStart }: KpiHealthPagePr
       (selectedDimension === "all" || kpi.healthDimension === selectedDimension),
   );
   const redKpis = filteredKpis.filter((kpi) => kpi.trend[kpi.trend.length - 1].status === "red");
+  const notRelevantKpis = filteredKpis.filter((kpi) => kpi.trend[kpi.trend.length - 1].status === "grey");
 
   return (
     <section className="panel">
@@ -120,7 +126,7 @@ export function KpiHealthPage({ kpis, phaseConfigs, weekStart }: KpiHealthPagePr
 
       <div className="kpi-health-summary">
         <MetricCard label="Filtered KPIs" value={String(filteredKpis.length)} detail={selectedPhase} tone="blue" />
-        <MetricCard label="Green latest trend" value={String(filteredKpis.length - redKpis.length)} detail="Latest week status" tone="green" />
+        <MetricCard label="Green latest trend" value={String(filteredKpis.length - redKpis.length - notRelevantKpis.length)} detail="Latest week status" tone="green" />
         <MetricCard label="Red latest trend" value={String(redKpis.length)} detail="Requires attention" tone={redKpis.length ? "red" : "green"} />
       </div>
 
@@ -166,7 +172,8 @@ export function KpiHealthPage({ kpis, phaseConfigs, weekStart }: KpiHealthPagePr
                 {filteredKpis.map((kpi) => {
                   const latest = kpi.trend[kpi.trend.length - 1];
                   const actual = actualTrend(kpi.trend);
-                  const thresholdTone = latestThresholdTone(latest.value, kpi.threshold, kpi.expectedTrend);
+                  const isNotRelevant = latest.applicabilityStatus === "not_relevant" || latest.status === "grey";
+                  const thresholdTone = isNotRelevant ? null : latestThresholdTone(latest.rawValue ?? latest.value, kpi.threshold, kpi.expectedTrend);
                   const latestTone = thresholdTone ?? latest.status;
                   const monitor = shouldMonitor(kpi);
                   return (
@@ -183,12 +190,13 @@ export function KpiHealthPage({ kpis, phaseConfigs, weekStart }: KpiHealthPagePr
                       </td>
                       <td>{kpi.threshold ?? "-"}</td>
                       <td>
-                        <Sparkline expectedTrend={kpi.expectedTrend} points={kpi.trend} threshold={kpi.threshold} />
+                        <Sparkline expectedTrend={kpi.expectedTrend} points={kpi.trend} threshold={kpi.threshold} usePointStatus />
                       </td>
                       <td className={thresholdTone ? `latest-value-cell latest-value-cell-${thresholdTone}` : "latest-value-cell"}>
                         <div className="latest-value-wrap">
-                          <span className={`status-pill status-pill-${latestTone}`}>{latest.value}</span>
+                          <span className={`status-pill status-pill-${latestTone}`}>{isNotRelevant ? "N/A" : latest.value}</span>
                           <small>Week of {latest.week}</small>
+                          {isNotRelevant && latest.applicabilityReason ? <small>{latest.applicabilityReason}</small> : null}
                         </div>
                       </td>
                       <td>

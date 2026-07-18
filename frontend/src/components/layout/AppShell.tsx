@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 
 import jswSteelLogo from "../../assets/jsw-steel-logo.png";
 
-export type DashboardView = "weekly-input" | "progress-monitor" | "kpi-health" | "heatmap" | "configuration";
+export type DashboardView = "weekly-input" | "progress-monitor" | "kpi-health" | "heatmap" | "documents" | "configuration";
 
 type AppShellProps = {
   activeView: DashboardView;
   children: ReactNode;
+  loggedInDuration: string;
+  onLogout: () => void;
   onViewChange: (view: DashboardView) => void;
 };
 
@@ -16,16 +18,26 @@ const navItems: Array<{ label: string; view: DashboardView }> = [
   { label: "Progress Monitor", view: "progress-monitor" },
   { label: "KPI Health", view: "kpi-health" },
   { label: "Heatmap", view: "heatmap" },
+  { label: "Documents", view: "documents" },
 ];
 
-export function AppShell({ activeView, children, onViewChange }: AppShellProps) {
+export function AppShell({ activeView, children, loggedInDuration, onLogout, onViewChange }: AppShellProps) {
   return (
     <div className="app-shell">
       <header className="app-header">
         <img alt="JSW Steel" src={jswSteelLogo} />
-        <div>
-          <span>Project Management Dashboard</span>
-          <strong>Project Control</strong>
+        <div className="app-header-actions">
+          <div>
+            <span>Project Management Dashboard</span>
+            <strong>Project Control</strong>
+          </div>
+          <div className="session-chip" aria-label="Logged in duration">
+            <span>Logged in</span>
+            <strong>{loggedInDuration}</strong>
+          </div>
+          <button className="logout-button" onClick={onLogout} type="button">
+            Logout
+          </button>
         </div>
       </header>
       <aside className="sidebar">

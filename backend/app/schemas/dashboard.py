@@ -12,6 +12,8 @@ class KpiTrendPoint(BaseModel):
     previous_value: Optional[float]
     status: str
     delta: Optional[float]
+    applicability_status: str = "applicable"
+    applicability_reason: Optional[str] = None
 
 
 class KpiHealthRead(BaseModel):
@@ -56,14 +58,29 @@ class ProjectHealthRead(BaseModel):
 class HeatmapKpiValueRead(BaseModel):
     week_start: date
     value: float
+    display_value: float
+    status: str
+    applicability_status: str = "applicable"
+    applicability_reason: Optional[str] = None
+
+
+class HeatmapKpiScoreRead(BaseModel):
+    week_start: date
+    score: Optional[int]
     status: str
 
 
 class HeatmapKpiRead(BaseModel):
+    code: str
+    category: str
     metric: str
+    expected_trend: str
+    monitor_period_weeks: Optional[int]
     threshold: Optional[float]
     has_threshold_breach: bool = False
+    trend_values: list[HeatmapKpiValueRead] = []
     last_values: list[HeatmapKpiValueRead]
+    score_values: list[HeatmapKpiScoreRead] = []
 
 
 class HeatmapCellRead(BaseModel):
@@ -92,6 +109,9 @@ class ProjectHeatmapRead(BaseModel):
     project_name: str
     mode: str
     week_start: Optional[date]
+    period_mode: str = "entire"
+    start_week: Optional[date] = None
+    end_week: Optional[date] = None
     phases: list[str]
     health_dimensions: list[str]
     health_dimension_scores: dict[str, float]

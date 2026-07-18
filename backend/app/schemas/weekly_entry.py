@@ -16,6 +16,8 @@ class WeeklyKpiEntryBase(BaseModel):
     numerator: Optional[float] = None
     denominator: Optional[float] = None
     component_values: dict[str, float] = {}
+    applicability_status: str = "applicable"
+    applicability_reason: Optional[str] = None
     notes: Optional[str] = None
 
 

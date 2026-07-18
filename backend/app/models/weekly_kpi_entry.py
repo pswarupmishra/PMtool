@@ -23,6 +23,8 @@ class WeeklyKpiEntry(Base):
     numerator: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     denominator: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     component_values: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+    applicability_status: Mapped[str] = mapped_column(String(30), default="applicable")
+    applicability_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

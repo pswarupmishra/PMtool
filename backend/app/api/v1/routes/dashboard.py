@@ -20,6 +20,9 @@ def project_heatmap(
     project_id: int,
     mode: str = "latest",
     week_start: Optional[str] = None,
+    period_mode: str = "entire",
+    start_week: Optional[str] = None,
+    end_week: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    return get_project_heatmap(db, project_id, mode, week_start)
+    return get_project_heatmap(db, project_id, mode, week_start, period_mode, start_week, end_week)

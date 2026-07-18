@@ -1,10 +1,13 @@
 export type TrendDirection = "positive" | "negative" | "equal";
-export type TrendStatus = "green" | "red";
+export type TrendStatus = "green" | "red" | "grey";
 
 export type KpiTrendPoint = {
   week: string;
   value: number;
+  rawValue?: number;
   status: TrendStatus;
+  applicabilityStatus?: "applicable" | "not_relevant";
+  applicabilityReason?: string | null;
 };
 
 export type KpiDefinition = {

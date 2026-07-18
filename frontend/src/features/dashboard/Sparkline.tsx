@@ -4,6 +4,7 @@ type SparklineProps = {
   points: KpiTrendPoint[];
   expectedTrend: TrendDirection;
   threshold: number | null;
+  usePointStatus?: boolean;
 };
 
 function thresholdStatus(value: number, expectedTrend: TrendDirection, threshold: number | null) {
@@ -13,7 +14,7 @@ function thresholdStatus(value: number, expectedTrend: TrendDirection, threshold
   return value === threshold ? "green" : "red";
 }
 
-export function Sparkline({ expectedTrend, points, threshold }: SparklineProps) {
+export function Sparkline({ expectedTrend, points, threshold, usePointStatus = false }: SparklineProps) {
   const width = 128;
   const height = 34;
   const padding = 4;
@@ -37,13 +38,17 @@ export function Sparkline({ expectedTrend, points, threshold }: SparklineProps) 
         <polyline className="sparkline-line sparkline-line-neutral" points={line} />
         {coordinates.map((coordinate) => (
           <circle
-            className={`sparkline-point sparkline-point-${thresholdStatus(coordinate.point.value, expectedTrend, threshold)}`}
+            className={`sparkline-point sparkline-point-${usePointStatus ? coordinate.point.status : thresholdStatus(coordinate.point.value, expectedTrend, threshold)}`}
             cx={coordinate.x}
             cy={coordinate.y}
             key={`${coordinate.point.week}-${coordinate.point.value}`}
             r="3"
           >
-            <title>{`${coordinate.point.week}: ${coordinate.point.value}${threshold === null ? " (no threshold)" : ` / threshold ${threshold}`}`}</title>
+            <title>
+              {coordinate.point.status === "grey"
+                ? `${coordinate.point.week}: N/A`
+                : `${coordinate.point.week}: ${coordinate.point.value}${threshold === null ? " (no threshold)" : ` / threshold ${threshold}`}`}
+            </title>
           </circle>
         ))}
       </svg>
