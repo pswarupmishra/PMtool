@@ -1,3 +1,5 @@
+import { useMemo, useState, type PointerEvent } from "react";
+
 const documentSections = [
   {
     title: "1. Configure The Project",
@@ -156,7 +158,186 @@ const dataFlow = [
   "KPI Health and Heatmap both use weekly-entry-backed analytics so drill-down values stay aligned.",
 ];
 
+type ErNodeId = "project" | "phases" | "tasks" | "weekly" | "kpi" | "dimensions";
+type ErSide = "top" | "right" | "bottom" | "left";
+type ErPosition = Record<ErNodeId, { x: number; y: number }>;
+
+const erCardWidth = 220;
+const erCardHeight = 150;
+const erInitialPositions: ErPosition = {
+  project: { x: 20, y: 34 },
+  phases: { x: 20, y: 212 },
+  tasks: { x: 20, y: 372 },
+  weekly: { x: 410, y: 266 },
+  kpi: { x: 410, y: 34 },
+  dimensions: { x: 750, y: 226 },
+};
+
+const erNodes: Array<{ id: ErNodeId; title: string; className: string; fields: Array<{ key?: string; value: string }> }> = [
+  {
+    id: "project",
+    title: "projects",
+    className: "er-card-project",
+    fields: [
+      { key: "PK", value: "id" },
+      { value: "name, owner" },
+      { value: "location, vendor" },
+      { value: "project_type, status" },
+      { value: "start_date, target_date" },
+    ],
+  },
+  {
+    id: "phases",
+    title: "project_phases",
+    className: "er-card-phases",
+    fields: [
+      { key: "PK", value: "id" },
+      { key: "FK", value: "project_id" },
+      { value: "name, sort_order" },
+      { value: "start_date, end_date" },
+      { value: "is_active" },
+    ],
+  },
+  {
+    id: "tasks",
+    title: "tasks",
+    className: "er-card-tasks",
+    fields: [
+      { key: "PK", value: "id" },
+      { key: "FK", value: "project_id" },
+      { value: "title, assignee" },
+      { value: "status, priority" },
+    ],
+  },
+  {
+    id: "weekly",
+    title: "weekly_kpi_entries",
+    className: "er-card-weekly",
+    fields: [
+      { key: "PK", value: "id" },
+      { key: "FK", value: "project_id" },
+      { key: "FK", value: "kpi_id" },
+      { value: "week_start, value" },
+      { value: "component_values" },
+      { value: "applicability_status" },
+      { value: "notes, created_at" },
+    ],
+  },
+  {
+    id: "kpi",
+    title: "kpi_definitions",
+    className: "er-card-kpi",
+    fields: [
+      { key: "PK", value: "id" },
+      { value: "code, metric, category" },
+      { value: "formula, components" },
+      { value: "phase, health_dimension" },
+      { value: "threshold, monitor_period" },
+      { value: "expected_trend, is_active" },
+    ],
+  },
+  {
+    id: "dimensions",
+    title: "health_dimensions",
+    className: "er-card-dimensions",
+    fields: [
+      { key: "PK", value: "id" },
+      { value: "name, description" },
+      { value: "score_percent" },
+      { value: "is_active" },
+    ],
+  },
+];
+
+const erRelationships: Array<{
+  id: string;
+  from: ErNodeId;
+  to: ErNodeId;
+  fromSide: ErSide;
+  toSide: ErSide;
+  label: string;
+  labelOffset?: { x: number; y: number };
+}> = [
+  { id: "project-phases", from: "project", to: "phases", fromSide: "bottom", toSide: "top", label: "1 to many", labelOffset: { x: -42, y: 0 } },
+  { id: "project-tasks", from: "project", to: "tasks", fromSide: "bottom", toSide: "top", label: "1 to many", labelOffset: { x: -44, y: 8 } },
+  { id: "project-weekly", from: "project", to: "weekly", fromSide: "right", toSide: "left", label: "1 to many", labelOffset: { x: -18, y: -28 } },
+  { id: "kpi-weekly", from: "kpi", to: "weekly", fromSide: "bottom", toSide: "top", label: "1 to many", labelOffset: { x: -34, y: 0 } },
+  { id: "kpi-phase", from: "kpi", to: "phases", fromSide: "left", toSide: "right", label: "maps by phase name", labelOffset: { x: -24, y: -28 } },
+  { id: "kpi-dimension", from: "kpi", to: "dimensions", fromSide: "right", toSide: "left", label: "maps by dimension name", labelOffset: { x: -4, y: -22 } },
+  { id: "weekly-phase", from: "weekly", to: "phases", fromSide: "left", toSide: "right", label: "analytics grouping", labelOffset: { x: -32, y: 22 } },
+];
+
+function erAnchor(position: ErPosition[ErNodeId], side: ErSide) {
+  switch (side) {
+    case "top":
+      return { x: position.x + erCardWidth / 2, y: position.y };
+    case "right":
+      return { x: position.x + erCardWidth, y: position.y + erCardHeight / 2 };
+    case "bottom":
+      return { x: position.x + erCardWidth / 2, y: position.y + erCardHeight };
+    case "left":
+      return { x: position.x, y: position.y + erCardHeight / 2 };
+  }
+}
+
+function erPath(start: { x: number; y: number }, end: { x: number; y: number }, startSide: ErSide) {
+  if (startSide === "top" || startSide === "bottom") {
+    const midY = (start.y + end.y) / 2;
+    return `M ${start.x} ${start.y} C ${start.x} ${midY}, ${end.x} ${midY}, ${end.x} ${end.y}`;
+  }
+  const midX = (start.x + end.x) / 2;
+  return `M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`;
+}
+
 export function DocumentationPage() {
+  const [erPositions, setErPositions] = useState<ErPosition>(erInitialPositions);
+  const [draggingErNode, setDraggingErNode] = useState<null | { id: ErNodeId; offsetX: number; offsetY: number }>(null);
+  const erFlows = useMemo(
+    () =>
+      erRelationships.map((relationship) => {
+        const start = erAnchor(erPositions[relationship.from], relationship.fromSide);
+        const end = erAnchor(erPositions[relationship.to], relationship.toSide);
+        const offset = relationship.labelOffset ?? { x: 0, y: 0 };
+        return {
+          ...relationship,
+          path: erPath(start, end, relationship.fromSide),
+          labelX: (start.x + end.x) / 2 + offset.x,
+          labelY: (start.y + end.y) / 2 + offset.y,
+        };
+      }),
+    [erPositions],
+  );
+
+  function beginErDrag(event: PointerEvent<HTMLDivElement>, id: ErNodeId) {
+    const current = erPositions[id];
+    const card = event.currentTarget.getBoundingClientRect();
+    setDraggingErNode({
+      id,
+      offsetX: event.clientX - card.left,
+      offsetY: event.clientY - card.top,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setErPositions({ ...erPositions, [id]: current });
+  }
+
+  function moveErNode(event: PointerEvent<HTMLDivElement>) {
+    if (!draggingErNode) {
+      return;
+    }
+
+    const canvas = event.currentTarget.getBoundingClientRect();
+    const nextX = Math.min(Math.max(event.clientX - canvas.left - draggingErNode.offsetX, 8), 960 - erCardWidth - 8);
+    const nextY = Math.min(Math.max(event.clientY - canvas.top - draggingErNode.offsetY, 8), 560 - erCardHeight - 8);
+    setErPositions((current) => ({
+      ...current,
+      [draggingErNode.id]: { x: nextX, y: nextY },
+    }));
+  }
+
+  function endErDrag() {
+    setDraggingErNode(null);
+  }
+
   return (
     <section className="panel documentation-page">
       <div className="section-heading documentation-heading">
@@ -178,6 +359,7 @@ export function DocumentationPage() {
             </a>
           ))}
           <a href="#logic-reference">Logic Reference</a>
+          <a href="#er-diagram">ER Diagram</a>
           <a href="#backend-api-reference">Backend API Reference</a>
         </aside>
 
@@ -222,6 +404,63 @@ export function DocumentationPage() {
                   <span>{card.detail}</span>
                 </div>
               ))}
+            </div>
+          </article>
+
+          <article className="doc-section" id="er-diagram">
+            <h3>ER Diagram</h3>
+            <p>
+              The database stores project configuration, KPI catalogue data, and weekly KPI transactions. KPI phase and health dimension mappings are stored as configured names, while weekly entries use foreign keys to projects and KPI definitions.
+            </p>
+            <div className="er-diagram-wrap" aria-label="Entity relationship diagram">
+              <div
+                className="er-diagram"
+                onPointerMove={moveErNode}
+                onPointerUp={endErDrag}
+                onPointerCancel={endErDrag}
+              >
+                <svg className="er-flow-lines" viewBox="0 0 960 560" aria-hidden="true">
+                  <defs>
+                    <marker id="er-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="7" refY="4">
+                      <path d="M0,0 L8,4 L0,8 Z" />
+                    </marker>
+                  </defs>
+                  {erFlows.map((flow) => (
+                    <path d={flow.path} key={flow.id} />
+                  ))}
+                </svg>
+                {erFlows.map((flow) => (
+                  <span
+                    className="er-connector"
+                    key={flow.id}
+                    style={{ left: flow.labelX, top: flow.labelY }}
+                  >
+                    {flow.label}
+                  </span>
+                ))}
+                {erNodes.map((node) => {
+                  const position = erPositions[node.id];
+                  return (
+                    <div
+                      className={`er-card ${node.className} ${draggingErNode?.id === node.id ? "er-card-dragging" : ""}`}
+                      key={node.id}
+                      onPointerDown={(event) => beginErDrag(event, node.id)}
+                      style={{ left: position.x, top: position.y }}
+                    >
+                      <strong>{node.title}</strong>
+                      {node.fields.map((field) => (
+                        <span key={`${node.id}-${field.key ?? ""}-${field.value}`}>
+                          {field.key ? <b>{field.key}</b> : null} {field.value}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="er-notes">
+              <span><strong>Unique rules:</strong> one project can have one entry per KPI per week, and phase names are unique within a project.</span>
+              <span><strong>Analytics path:</strong> weekly_kpi_entries join projects and kpi_definitions, then use configured phase and health_dimension values for KPI Health and Heatmap reporting.</span>
             </div>
           </article>
 
